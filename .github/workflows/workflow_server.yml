@@ -1,12 +1,13 @@
-name: Escaneo Server Pro
+name: Escaneo Server Pro (Pelis y Series)
 
 on:
   schedule:
-    - cron: '0 12 */2 * *' # Cada 2 días a las 6:00 AM CDMX
+    # Ejecutar cada 2 días a las 12:00 UTC (6:00 AM CDMX)
+    - cron: '0 12 */2 * *'
   workflow_dispatch:
 
 jobs:
-  scan:
+  scan-server-completo:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,17 +23,28 @@ jobs:
       - name: Instalar Requests
         run: pip install requests
 
-      - name: Ejecutar Escaneo Seguro
+      # --- 1. ESCANEAR PELICULAS (Tu script anterior: scan_pro.py) ---
+      - name: Escanear PELICULAS
         env:
-          # AQUÍ SE CONECTA EL SECRETO
           URL_SERVER_IP: ${{ secrets.URL_SERVER_IP }}
         run: python scan_pro.py
 
-      - name: Guardar M3U
+      # --- 2. ESCANEAR SERIES (El script nuevo: scan_server_series.py) ---
+      - name: Escanear SERIES
+        env:
+          URL_SERVER_IP: ${{ secrets.URL_SERVER_IP }}
+        run: python scan_server_series.py
+
+      # --- 3. GUARDAR TODO ---
+      - name: Guardar M3Us en Repo
         run: |
           git config --global user.name "Bot-Scanner"
           git config --global user.email "bot@github.com"
           git pull origin main --rebase || echo "Repo al día"
+          
+          # Agregamos AMBOS archivos
           git add lista_server.m3u
-          git commit -m "Update: Lista Filtrada y Segura" || echo "Sin cambios"
+          git add lista_server_series.m3u
+          
+          git commit -m "Update: Server Completo (Pelis y Series) $(date)" || echo "Sin cambios"
           git push origin main
