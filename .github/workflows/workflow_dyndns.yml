@@ -35,7 +35,7 @@ jobs:
           git config --global user.email "bot@github.com"
           git pull origin main --rebase || echo "Repo al día"
           
-          git add lista_fina.m3u
+          git add lista_dyndns.m3u
           
           git commit -m "Update: Lista Dyndns $(date)" || echo "Sin cambios"
           git push origin main
