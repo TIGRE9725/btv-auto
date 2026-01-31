@@ -69,7 +69,8 @@ with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
             titulo = titulo.replace(ext, "")
             
         # 3. Escribir
-        f.write(f'#EXTINF:-1 tvg-id="avi" tvg-logo="" group-title="PELICULAS",{titulo}\n')
+        f.write(f'#EXTINF:-1 tvg-id="avi" tvg-logo="" group-title="PELIS-BTV",{titulo}\n')
         f.write(f'{link_final}\n')
+
 
 print(f"💾 Guardado en {ARCHIVO_SALIDA}")
