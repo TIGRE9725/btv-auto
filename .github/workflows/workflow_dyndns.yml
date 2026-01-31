@@ -1,0 +1,41 @@
+name: Escaneo dyndns
+
+on:
+  schedule:
+    # Ejecutar cada 2 días a las 13:00 UTC
+    - cron: '0 13 */2 * *'
+  workflow_dispatch:
+
+jobs:
+  scan-fina:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Requests
+        run: pip install requests
+
+      - name: Ejecutar Escaneo
+        env:
+          # Usamos el nuevo nombre del secreto
+          URL_DYNDS: ${{ secrets.URL_DYNDS }}
+        run: python scan_dyndns.py
+
+      - name: Guardar M3U en Repo
+        run: |
+          git config --global user.name "Bot-Fina"
+          git config --global user.email "bot@github.com"
+          git pull origin main --rebase || echo "Repo al día"
+          
+          git add lista_fina.m3u
+          
+          git commit -m "Update: Lista Dyndns $(date)" || echo "Sin cambios"
+          git push origin main
