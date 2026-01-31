@@ -23,7 +23,7 @@ if not URL_BASE:
 
 def escanear(id_serie):
     url = f"{URL_BASE}/s.php?m={id_serie}"
-    try
+    try:
         r = session.head(url, allow_redirects=False, timeout=3)
         if r.status_code in [301, 302]:
             location = r.headers.get('Location', '')
@@ -90,5 +90,6 @@ with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
         # --- C. Guardar ---
         f.write(f'#EXTINF:-1 tvg-id="avi" tvg-logo="" group-title="{grupo}",{titulo}\n')
         f.write(f'{link_final}\n')
+
 
 print(f"💾 Guardado en {ARCHIVO_SALIDA}")
