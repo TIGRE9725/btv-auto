@@ -1,0 +1,48 @@
+name: BTV Scanner (Python)
+
+on:
+  schedule:
+    # Ejecutar cada 2 días a las 10:00 UTC (4:00 AM CDMX)
+    - cron: '0 10 */2 * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Permiso para guardar los archivos M3U
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Instalar Requests
+      run: pip install requests
+      
+    - name: 1. Escanear Películas
+      env:
+        URL_BASE_BTV: ${{ secrets.URL_BASE_BTV }}
+      run: python scan_peliculas.py
+      
+    - name: 2. Escanear Series
+      env:
+        URL_BASE_BTV: ${{ secrets.URL_BASE_BTV }}
+      run: python scan_series.py
+      
+    - name: 3. Guardar en Repositorio
+      run: |
+        git config --global user.name "BTV-Bot"
+        git config --global user.email "bot@github.com"
+        
+        # Intentamos actualizar el repo antes de guardar
+        git pull origin main --rebase || echo "Repo al día"
+        
+        git add playlist_peliculas.m3u
+        git add playlist_series.m3u
+        
+        git commit -m "Auto-Update: BTV Scan Completo" || echo "Sin cambios"
+        git push origin main
