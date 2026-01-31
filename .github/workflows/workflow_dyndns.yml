@@ -1,13 +1,13 @@
-name: Escaneo dyndns
+name: Escaneo dyndns (Completo)
 
 on:
   schedule:
-    # Ejecutar cada 2 días a las 13:00 UTC
+    # Ejecutar cada 2 días a las 13:00 UTC (7:00 AM CDMX)
     - cron: '0 13 */2 * *'
   workflow_dispatch:
 
 jobs:
-  scan-fina:
+  scan-fina-completo:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -23,19 +23,28 @@ jobs:
       - name: Instalar Requests
         run: pip install requests
 
-      - name: Ejecutar Escaneo
+      # --- PASO 1: ESCANEAR PELÍCULAS ---
+      - name: Ejecutar Escaneo PELICULAS
         env:
-          # Usamos el nuevo nombre del secreto
           URL_DYNDS: ${{ secrets.URL_DYNDS }}
         run: python scan_dyndns.py
 
+      # --- PASO 2: ESCANEAR SERIES ---
+      - name: Ejecutar Escaneo SERIES
+        env:
+          URL_DYNDS: ${{ secrets.URL_DYNDS }}
+        run: python scan_dyndns_series.py
+
+      # --- PASO 3: GUARDAR TODO ---
       - name: Guardar M3U en Repo
         run: |
           git config --global user.name "Bot-Fina"
           git config --global user.email "bot@github.com"
           git pull origin main --rebase || echo "Repo al día"
           
+          # Agregamos AMBOS archivos
           git add lista_dyndns.m3u
+          git add lista_dyndns_series.m3u
           
-          git commit -m "Update: Lista Dyndns $(date)" || echo "Sin cambios"
+          git commit -m "Update: Listas Dyndns (Pelis y Series) $(date)" || echo "Sin cambios"
           git push origin main
