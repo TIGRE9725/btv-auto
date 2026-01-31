@@ -1,0 +1,38 @@
+name: Escaneo Server Pro
+
+on:
+  schedule:
+    - cron: '0 12 */2 * *' # Cada 2 días a las 6:00 AM CDMX
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Requests
+        run: pip install requests
+
+      - name: Ejecutar Escaneo Seguro
+        env:
+          # AQUÍ SE CONECTA EL SECRETO
+          URL_SERVER_IP: ${{ secrets.URL_SERVER_IP }}
+        run: python scan_pro.py
+
+      - name: Guardar M3U
+        run: |
+          git config --global user.name "Bot-Scanner"
+          git config --global user.email "bot@github.com"
+          git pull origin main --rebase || echo "Repo al día"
+          git add lista_server.m3u
+          git commit -m "Update: Lista Filtrada y Segura" || echo "Sin cambios"
+          git push origin main
