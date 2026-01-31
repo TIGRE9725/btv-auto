@@ -28,10 +28,10 @@ PROHIBIDO = [
     # --- ADULTOS ---
     "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI",
     # --- SERIES INTRUSAS (Para que no salgan en lista de pelis) ---
-    "Game of Thrones", "Game%20of%20Thrones",
+    "Game of Thrones", "Game%20of%20Thrones", "Game%20of%20Thrones4k", "Dave,%20El%20Barbaro", "Monster%20High", "Monster%20High%20Serie", "Rupaul's%20Drag%20Race%20All%20Stars", "Switch%20Drag%20Race", "The_Neighborhoodt", "Yin%20Yang%20Yo", "Ahsoka%204k", "Game%20Of%20Thrones", "Game%20Of%20Thrones%204k",
     "Season", "Temporada", "Capitulo", "Episodio",
     "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
-    "E01", "E02", "Series", "Serie"
+    "E01", "E02", "Series", "Serie", "series", "serie", "SERIES%204K", "ANIME", "ANIME%202023", "DORAMAS", "ESTRENO%20SERIES", "REPARTIR", "Primo", "RETROSV", "SEIRES%202023", "SERIES%202024", "Series_2", "TURKASS", "Telenovelas", "Tv%20Novelas%202", "SERIES%20DOBLE%20AUIDO%202"
 ]
 
 EXTENSIONES_VIDEO = ('.mp4', '.mkv', '.avi', '.ts', '.m3u8')
