@@ -11,11 +11,6 @@ from urllib.parse import urljoin
 # 1. RECUPERAR IP DEL SECRETO (Nadie la verá en el código)
 HOST = os.environ.get("URL_SERVER_IP")
 
-if not HOST:
-    print("❌ Error: No se encontró el secreto URL_SERVER_IP")
-    # Fallback por si lo pruebas en tu PC (borrar antes de subir)
-    HOST = "http://15.235.51.60" 
-
 # 2. DEFINIR LAS RUTAS RELATIVAS (El script las pegará al HOST)
 RUTAS_A_ESCANEAR = [
     "/contenido/",
