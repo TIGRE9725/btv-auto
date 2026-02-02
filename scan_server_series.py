@@ -2,157 +2,151 @@ import requests
 import re
 import urllib.parse
 import os
-from urllib.parse import urljoin
+from urllib.parse import urljoin, unquote
 
 # ==========================================
 # ⚙️ CONFIGURACIÓN SERIES (LISTA BLANCA)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
-if not HOST: HOST = "http://15.235.51.60"
 
 RUTAS_A_ESCANEAR = [
     "/contenido/",
     "/server2/contenido/",
-    "/server3/contenido/series/" # En esta carpeta específica, podríamos relajar el filtro, pero mejor ser estrictos globalmente
+    "/server3/contenido/series/" 
 ]
 
 ARCHIVO_SALIDA = "lista_server_series.m3u"
 PROFUNDIDAD_MAX = 8
 
-# 1. LISTA NEGRA (Lo que NUNCA debe entrar, prioridad máxima)
+# 1. LISTA NEGRA DE ARCHIVOS (Lo que NUNCA debe entrar)
 PROHIBIDO = [
-    "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI", "SEX", "sex", "peliculas", "Peliculas", "PELICULAS", "CINE%20CAM", "PELICULAS%204K", "PELICULAS%2060%20FPS", "SAGA", "CINECAN", "CLASICAST", "ESTRENOS%20PELICULAS%202", "KIDS", "MEXICANAST", "Navidad", "PELICULAS%2060%20FPS", "PELICULAS%202023", "PELICULAS2024", "PELICULAS%20DC", "PELICULAS%20DE%20TEMPORADA%20HALLOWEEN",
+    "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI", "SEX", "sex", 
+    "peliculas", "Peliculas", "PELICULAS", "CINE%20CAM", "PELICULAS%204K", 
+    "PELICULAS%2060%20FPS", "SAGA", "CINECAN", "CLASICAST", "ESTRENOS%20PELICULAS%202", 
+    "KIDS", "MEXICANAST", "Navidad", "PELICULAS%2060%20FPS", "PELICULAS%202023", 
+    "PELICULAS2024", "PELICULAS%20DC", "PELICULAS%20DE%20ACCION", "PELICULAS%20DISNEY"
 ]
 
-# 2. LISTA BLANCA (SOLO entra si tiene alguna de estas palabras)
-# Aquí pegué TU LISTA exacta. Si una carpeta no tiene esto, SE IGNORA.
-PERMITIDOS = [
-    "Game of Thrones", "Game%20of%20Thrones", "Game%20of%20Thrones4k", 
-    "Dave,%20El%20Barbaro", "Monster%20High", "Monster%20High%20Serie", 
-    "Rupaul's%20Drag%20Race%20All%20Stars", "Switch%20Drag%20Race", 
-    "The_Neighborhoodt", "Yin%20Yang%20Yo", "Ahsoka%204k", 
-    "Game%20Of%20Thrones", "Game%20Of%20Thrones%204k",
-    "Season", "Temporada", "Capitulo", "Episodio",
-    "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
-    "E01", "E02", "Series", "Serie", "series", "serie", 
-    "SERIES%204K", "ANIME", "ANIME%202023", "DORAMAS", 
-    "ESTRENO%20SERIES", "REPARTIR", "Primo", "RETROSV", 
-    "SEIRES%202023", "SERIES%202024", "Series_2", "TURKASS", 
-    "Telenovelas", "Tv%20Novelas%202", "SERIES%20DOBLE%20AUIDO%202"
+# 2. EXTENSIONES VÁLIDAS
+EXTENSIONES_VIDEO = ['.mp4', '.mkv', '.avi']
+
+# 3. CARPETAS A IGNORAR AL BUSCAR EL NOMBRE DE LA SERIE
+IGNORAR_EN_GRUPO = [
+    'contenido', 'server2', 'server3', 'series', 'series 4k', 'series 4k', 
+    'lat', 'sub', 'cast', 'dual', 'latino', 'spa', 'eng', 'english', 'spanish',
+    '1080p', '720p', '4k', 'hd', 'sd', 'web-dl',
+    'temp', 'temporada', 'season', 's', 't', 'vol', 'volume'
 ]
 
-EXTENSIONES_VIDEO = ('.mp4', '.mkv', '.avi', '.ts', '.m3u8')
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
-
-urls_visitadas = set()
-lista_final = []
-
-session = requests.Session()
-session.headers.update(HEADERS)
+# ==========================================
+# 🛠️ FUNCIONES
+# ==========================================
 
 def limpiar_texto(texto):
-    texto = urllib.parse.unquote(texto)
-    texto = texto.replace("_", " ").replace(".", " ")
-    return texto.strip()
+    """Decodifica URL y limpia caracteres"""
+    texto = unquote(texto)
+    return texto
 
-def es_contenido_prohibido(texto):
-    """Filtro de Seguridad (Anti-Porn)"""
-    texto_lower = texto.lower()
-    for mala in PROHIBIDO:
-        if mala.lower() in texto_lower:
-            return True
-    return False
+def es_contenido_permitido(url):
+    """Filtra pornografía y películas en el escaneo de series"""
+    url_lower = url.lower()
+    for mal in PROHIBIDO:
+        if mal.lower() in url_lower:
+            return False
+    return True
 
-def es_contenido_permitido(texto):
+def obtener_grupo_inteligente(url_completa):
     """
-    Filtro de Inclusión (Solo Series).
-    Devuelve True si el texto contiene alguna palabra de la lista PERMITIDOS.
+    Recorre la URL de atrás hacia adelante para encontrar el nombre REAL de la serie.
+    Ignora carpetas de idiomas (lat/sub), números (1, 2) y sistema.
     """
-    # Si la lista de permitidos está vacía, dejamos pasar todo (modo inseguro)
-    if not PERMITIDOS: return True
+    # 1. Decodificar y separar
+    path = urllib.parse.urlparse(url_completa).path
+    path = unquote(path)
+    partes = path.split('/')
     
-    texto_lower = texto.lower()
-    for buena in PERMITIDOS:
-        if buena.lower() in texto_lower:
-            return True
-    return False
+    # Eliminar vacíos y el nombre del archivo final
+    partes = [p for p in partes if p.strip()]
+    if partes: partes.pop() # Quitamos archivo.mp4
 
-def obtener_grupo_serie(url_completa):
-    try:
-        partes = url_completa.split("/")
-        carpeta_inmediata = limpiar_texto(partes[-2])
+    # 2. Recorrer hacia atrás
+    for carpeta in reversed(partes):
+        carpeta_lower = carpeta.lower()
         
-        es_temporada = re.search(r'(?i)(Season|Temporada|Volume|S\d+|T\d+|Libro)', carpeta_inmediata)
-        
-        if es_temporada and len(partes) >= 3:
-            nombre_serie = limpiar_texto(partes[-3])
-        else:
-            nombre_serie = carpeta_inmediata
-
-        if nombre_serie.lower() in ["contenido", "series", "server2", "server3", "4kl", "peliculas"]:
-            return "SERIES - VARIAS"
+        # A. Ignorar números sueltos (ej: "1", "042")
+        if re.match(r'^\d+$', carpeta):
+            continue
             
-        return f"SERIES - {nombre_serie}"
-    except:
-        return "SERIES - VARIAS"
+        # B. Ignorar patrones de temporada (Season X, Temp X)
+        if re.search(r'^(season|temporada|temp|t\d+|s\d+|vol|volume)', carpeta_lower):
+            continue
+
+        # C. Ignorar carpetas técnicas o de idioma (SUB, LAT, 4K, CONTENIDO)
+        ignorar_este = False
+        for basura in IGNORAR_EN_GRUPO:
+            if basura == carpeta_lower:
+                ignorar_este = True
+                break
+        if ignorar_este: continue
+
+        # --- SI LLEGAMOS AQUÍ, ES PROBABLEMENTE LA SERIE ---
+        
+        # Limpieza final del nombre de la serie (ej: "Serie 4k" -> "Serie")
+        nombre_final = re.sub(r'\s+4k$', '', carpeta, flags=re.IGNORECASE)
+        nombre_final = nombre_final.strip()
+        
+        return nombre_final
+
+    return "Series Varias" # Fallback
+
+lista_final = ["#EXTM3U"]
 
 def escanear(url, nivel):
     if nivel > PROFUNDIDAD_MAX: return
-    if url in urls_visitadas: return
-    
-    urls_visitadas.add(url)
-    print(f"📂 Escaneando: {url}")
 
     try:
-        r = session.get(url, timeout=10)
+        r = requests.get(url, timeout=10)
         if r.status_code != 200: return
-        
-        html = r.text
-        enlaces = re.findall(r'href=["\']([^"\']+)["\']', html)
-        
+
+        # Buscar enlaces en el HTML del servidor (Apache/Nginx listing)
+        # Buscamos href="..."
+        enlaces = re.findall(r'href=["\'](.*?)["\']', r.text)
+
         for link_raw in enlaces:
-            if link_raw in ['../', './', '/', '?C=N;O=D', '?C=M;O=A', '?C=S;O=A', '?C=D;O=A']:
+            # Ignorar enlaces de navegación
+            if link_raw in ['../', './', '?', '#'] or link_raw.startswith('?'):
                 continue
             
             full_link = urljoin(url, link_raw)
             
-            # 1. FILTRO DE SEGURIDAD (Si es XXX, adiós)
-            if es_contenido_prohibido(link_raw) or es_contenido_prohibido(full_link):
-                continue
-
-            # 2. FILTRO ESTRICTO DE SERIES (Aquí está la magia)
-            # Para entrar a una carpeta o guardar un video, DEBE tener una palabra clave de serie.
-            # PERO: Las carpetas raíz (/4KL/, /contenido/) no suelen tener esas palabras.
-            # Así que aplicamos la lógica:
-            # - Si es un VIDEO: Verificamos si la ruta completa cumple con PERMITIDOS.
-            # - Si es CARPETA: Entramos para explorar (salvo que sea prohibida), 
-            #   la validación real ocurre al encontrar los videos o subcarpetas clave.
-            
-            # --- CASO A: VIDEO ---
-            if full_link.lower().endswith(EXTENSIONES_VIDEO):
-                # AQUI ES EL FILTRO FUERTE:
-                # Si la URL completa NO tiene ninguna palabra de PERMITIDOS, es una película (John Wick), IGNORAR.
+            # --- CASO A: ARCHIVO DE VIDEO ---
+            if any(link_raw.lower().endswith(ext) for ext in EXTENSIONES_VIDEO):
+                
+                # Filtro estricto (Nada de XXX ni Peliculas mezcladas)
                 if not es_contenido_permitido(full_link):
-                    # print(f"   🚫 Ignorando Película/Otro: {link_raw}")
                     continue
 
+                # Preparar Titulo
                 titulo = limpiar_texto(link_raw)
                 for ext in EXTENSIONES_VIDEO:
                     titulo = titulo.replace(ext, "")
                 
-                grupo = obtener_grupo_serie(full_link)
+                # --- NUEVA LÓGICA DE GRUPO INTELIGENTE ---
+                grupo = obtener_grupo_inteligente(full_link)
+                
+                # Generar entrada M3U
+                # Usamos el grupo en el título para mejor visualización
+                # Ej: group="Umbrella Academy", title="Umbrella Academy S01E01..."
                 entry = f'#EXTINF:-1 tvg-id="" tvg-logo="" group-title="{grupo}",{titulo}\n{full_link}'
                 lista_final.append(entry)
 
             # --- CASO B: CARPETA ---
             elif link_raw.endswith('/'):
-                # Dejamos que explore carpetas genéricas (como /4KL/) 
-                # porque dentro podría estar 'Game of Thrones'.
-                # Si dentro está 'John Wick', cuando llegue al video .mp4, el filtro de arriba lo matará.
+                # Filtro previo: Si la carpeta es XXX, ni entramos
+                if not es_contenido_permitido(full_link):
+                    continue
+                    
                 escanear(full_link, nivel + 1)
 
     except Exception as e:
@@ -162,7 +156,8 @@ def escanear(url, nivel):
 # 🚀 EJECUCIÓN
 # ==========================================
 
-print(f"--- INICIANDO ESCANEO ESTRICTO DE SERIES ---")
+print(f"--- ESCANEO INTELIGENTE SERVER V2 (SMART GROUPS) ---")
+print(f"Host: {HOST}")
 
 urls_objetivo = [urljoin(HOST, ruta) for ruta in RUTAS_A_ESCANEAR]
 
@@ -170,10 +165,9 @@ for url_raiz in urls_objetivo:
     print(f"\n🌍 Iniciando en: {url_raiz}")
     escanear(url_raiz, 1)
 
-print(f"\n✅ FINALIZADO. Episodios encontrados: {len(lista_final)}")
+print(f"\n✅ FINALIZADO. Episodios encontrados: {len(lista_final)-1}")
 
-with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
-    f.write("#EXTM3U\n")
+with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
     f.write("\n".join(lista_final))
 
-print(f"💾 Guardado en: {ARCHIVO_SALIDA}")
+print(f"📄 Lista guardada en: {ARCHIVO_SALIDA}")
