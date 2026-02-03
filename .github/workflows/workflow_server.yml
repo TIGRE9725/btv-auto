@@ -2,8 +2,8 @@ name: Escaneo Server Pro (Pelis y Series)
 
 on:
   schedule:
-    # Ejecutar cada 2 días a las 12:00 UTC (6:00 AM CDMX)
-    - cron: '0 12 */2 * *'
+    # Ejecutar cada 7 días a las 12:00 UTC (6:00 AM CDMX)
+    - cron: '0 12 */7 * *'
   workflow_dispatch:
 
 jobs:
