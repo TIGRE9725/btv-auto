@@ -7,11 +7,11 @@ import threading
 from urllib.parse import urljoin, unquote
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN TURBO V3
+# ⚙️ CONFIGURACIÓN V3.1 (DEEP SCAN)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
-if not HOST: HOST = "http://15.235.51.60"
+
 
 # Rutas iniciales
 RUTAS_SEMILLA = [
@@ -21,9 +21,11 @@ RUTAS_SEMILLA = [
 ]
 
 ARCHIVO_SALIDA = "lista_server_series.m3u"
-PROFUNDIDAD_MAX = 6  # Bajamos un poco para asegurar terminación
-HILOS = 30           # 30 Conexiones simultáneas
-TIMEOUT = 5          # 5 segundos máximo por carpeta
+
+# AJUSTES PARA RECUPERAR LOS 80,000 ARCHIVOS
+PROFUNDIDAD_MAX = 12 # Subido de 6 a 12 para llegar más profundo
+HILOS = 25           # Hilos equilibrados
+TIMEOUT = 15         # 15s para dar tiempo a carpetas grandes
 
 # Listas de Filtro
 PROHIBIDO = [
@@ -46,7 +48,6 @@ IGNORAR_EN_GRUPO = [
 # 🛠️ FUNCIONES
 # ==========================================
 
-# Candado para escribir en la lista compartida por los hilos
 lock_lista = threading.Lock()
 lista_final = []
 visitados = set()
@@ -118,7 +119,6 @@ def escanear_url(url):
             # Si es CARPETA
             elif link_raw.endswith('/'):
                 if not es_contenido_permitido(full_link): continue
-                # Añadir a la lista para escanear en el siguiente nivel
                 subcarpetas_nuevas.append(full_link)
 
     except:
@@ -127,13 +127,13 @@ def escanear_url(url):
     return subcarpetas_nuevas
 
 # ==========================================
-# 🚀 EJECUCIÓN POR NIVELES (Anti-Overflow)
+# 🚀 EJECUCIÓN POR NIVELES
 # ==========================================
 
-print(f"--- ESCANEO TURBO SERIES V3 (THREADS + BFS) ---")
+print(f"--- ESCANEO SERIES V3.1 (PROFUNDIDAD 12) ---")
 print(f"Host: {HOST}")
 
-# Nivel 0: Las semillas
+# Nivel 0
 urls_actuales = [urljoin(HOST, ruta) for ruta in RUTAS_SEMILLA]
 for u in urls_actuales: visitados.add(u)
 
@@ -142,7 +142,6 @@ for nivel in range(1, PROFUNDIDAD_MAX + 1):
     
     siguientes_urls = []
     
-    # Usamos ThreadPool para procesar este nivel en paralelo
     with concurrent.futures.ThreadPoolExecutor(max_workers=HILOS) as executor:
         futuros = {executor.submit(escanear_url, url): url for url in urls_actuales}
         
@@ -152,7 +151,6 @@ for nivel in range(1, PROFUNDIDAD_MAX + 1):
         for future in concurrent.futures.as_completed(futuros):
             nuevas = future.result()
             
-            # Filtramos las que ya visitamos para evitar bucles
             for n in nuevas:
                 if n not in visitados:
                     visitados.add(n)
@@ -160,9 +158,8 @@ for nivel in range(1, PROFUNDIDAD_MAX + 1):
             
             completados += 1
             if completados % 50 == 0:
-                print(f"   Progreso Nivel {nivel}: {completados}/{total_nivel} ... Videos hallados: {len(lista_final)}", end="\r")
+                print(f"   Progreso: {completados}/{total_nivel} ... Videos: {len(lista_final)}", end="\r")
 
-    # Preparamos el siguiente nivel
     urls_actuales = siguientes_urls
     if not urls_actuales:
         print("\n   No hay más subcarpetas. Terminando.")
