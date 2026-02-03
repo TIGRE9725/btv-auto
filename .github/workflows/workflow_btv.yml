@@ -2,8 +2,8 @@ name: BTV Scanner (Python)
 
 on:
   schedule:
-    # Ejecutar cada 2 días a las 10:00 UTC (4:00 AM CDMX)
-    - cron: '0 10 */2 * *'
+    # Ejecutar cada 7 días a las 10:00 UTC (4:00 AM CDMX)
+    - cron: '0 10 */7 * *'
   workflow_dispatch:
 
 jobs:
