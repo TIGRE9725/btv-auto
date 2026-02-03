@@ -4,16 +4,16 @@ import urllib.parse
 import os
 import concurrent.futures
 import threading
+import time
 from urllib.parse import urljoin, unquote
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN V3.1 (DEEP SCAN)
+# ⚙️ CONFIGURACIÓN V3.2 (TANK MODE)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
 
 
-# Rutas iniciales
 RUTAS_SEMILLA = [
     "/contenido/",
     "/server2/contenido/",
@@ -22,12 +22,13 @@ RUTAS_SEMILLA = [
 
 ARCHIVO_SALIDA = "lista_server_series.m3u"
 
-# AJUSTES PARA RECUPERAR LOS 80,000 ARCHIVOS
-PROFUNDIDAD_MAX = 12 # Subido de 6 a 12 para llegar más profundo
-HILOS = 25           # Hilos equilibrados
-TIMEOUT = 15         # 15s para dar tiempo a carpetas grandes
+# --- AJUSTES DE RECUPERACIÓN ---
+PROFUNDIDAD_MAX = 15  # Profundidad máxima para no dejar nada
+HILOS = 15            # Menos hilos = Mayor estabilidad (evita bloqueos del server)
+TIMEOUT = 30          # 30s de paciencia para carpetas gigantes
+MAX_RETRIES = 3       # Intentos por carpeta antes de rendirse
 
-# Listas de Filtro
+# Filtros
 PROHIBIDO = [
     "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI", "SEX", "sex", 
     "peliculas", "Peliculas", "PELICULAS", "CINE%20CAM", "PELICULAS%204K", 
@@ -51,6 +52,7 @@ IGNORAR_EN_GRUPO = [
 lock_lista = threading.Lock()
 lista_final = []
 visitados = set()
+errores_log = []
 
 def limpiar_texto(texto):
     return unquote(texto)
@@ -86,14 +88,38 @@ def obtener_grupo_inteligente(url_completa):
 
     return "Series Varias"
 
+def request_con_retry(url):
+    """Intenta descargar la URL varias veces si falla"""
+    for intento in range(MAX_RETRIES):
+        try:
+            r = requests.get(url, timeout=TIMEOUT)
+            if r.status_code == 200:
+                return r
+            elif r.status_code == 404:
+                return None # No existe, no reintentar
+        except requests.RequestException:
+            pass # Falló conexión, reintentar
+        
+        # Espera un poco antes de reintentar (backoff)
+        time.sleep(1 + intento)
+    
+    return None
+
 def escanear_url(url):
-    """Procesa UNA carpeta y devuelve las subcarpetas encontradas"""
+    """Procesa UNA carpeta con blindaje contra fallos"""
     subcarpetas_nuevas = []
     
-    try:
-        r = requests.get(url, timeout=TIMEOUT)
-        if r.status_code != 200: return []
+    # 1. Descargar con reintentos
+    r = request_con_retry(url)
+    
+    if not r:
+        # Si falló después de 3 intentos, lo registramos
+        with lock_lista:
+            errores_log.append(url)
+        return []
 
+    try:
+        # 2. Analizar contenido
         enlaces = re.findall(r'href=["\'](.*?)["\']', r.text)
 
         for link_raw in enlaces:
@@ -101,7 +127,7 @@ def escanear_url(url):
             
             full_link = urljoin(url, link_raw)
             
-            # Si es VIDEO
+            # VIDEO DETECTADO
             if any(link_raw.lower().endswith(ext) for ext in EXTENSIONES_VIDEO):
                 if not es_contenido_permitido(full_link): continue
 
@@ -116,22 +142,25 @@ def escanear_url(url):
                 with lock_lista:
                     lista_final.append(entry)
 
-            # Si es CARPETA
+            # CARPETA DETECTADA
             elif link_raw.endswith('/'):
                 if not es_contenido_permitido(full_link): continue
                 subcarpetas_nuevas.append(full_link)
 
-    except:
+    except Exception as e:
+        # Error de parsing raro
+        print(f"Error procesando {url}: {e}")
         pass
         
     return subcarpetas_nuevas
 
 # ==========================================
-# 🚀 EJECUCIÓN POR NIVELES
+# 🚀 EJECUCIÓN BLINDADA
 # ==========================================
 
-print(f"--- ESCANEO SERIES V3.1 (PROFUNDIDAD 12) ---")
+print(f"--- ESCANEO SERIES V3.2 (TANK MODE) ---")
 print(f"Host: {HOST}")
+print(f"Config: Hilos={HILOS}, Timeout={TIMEOUT}s, Retries={MAX_RETRIES}, Profundidad={PROFUNDIDAD_MAX}")
 
 # Nivel 0
 urls_actuales = [urljoin(HOST, ruta) for ruta in RUTAS_SEMILLA]
@@ -157,15 +186,21 @@ for nivel in range(1, PROFUNDIDAD_MAX + 1):
                     siguientes_urls.append(n)
             
             completados += 1
-            if completados % 50 == 0:
-                print(f"   Progreso: {completados}/{total_nivel} ... Videos: {len(lista_final)}", end="\r")
+            if completados % 20 == 0:
+                print(f"   [N{nivel}] Progreso: {completados}/{total_nivel} | Series: {len(lista_final)}", end="\r")
 
     urls_actuales = siguientes_urls
     if not urls_actuales:
-        print("\n   No hay más subcarpetas. Terminando.")
+        print("\n   ✅ Profundidad máxima alcanzada o sin más carpetas.")
         break
 
-print(f"\n\n✅ FINALIZADO. Episodios totales: {len(lista_final)}")
+print(f"\n\n🏁 FINALIZADO.")
+print(f"📥 Episodios totales recuperados: {len(lista_final)}")
+
+if errores_log:
+    print(f"⚠️ Hubo {len(errores_log)} carpetas imposibles de leer (Timeouts/Errores).")
+    # Opcional: Imprimir las primeras 5 para ver qué falló
+    # for e in errores_log[:5]: print(f"   - {e}")
 
 with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
     f.write("#EXTM3U\n")
