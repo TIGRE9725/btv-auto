@@ -8,13 +8,12 @@ import time
 from urllib.parse import urljoin, unquote
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN V3.2 (TANK MODE)
+# ⚙️ CONFIGURACIÓN V6 (FINAL FUSION)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
 
-
-RUTAS_SEMILLA = [
+RUTAS_A_ESCANEAR = [
     "/contenido/",
     "/server2/contenido/",
     "/server3/contenido/series/"
@@ -22,22 +21,25 @@ RUTAS_SEMILLA = [
 
 ARCHIVO_SALIDA = "lista_server_series.m3u"
 
-# --- AJUSTES DE RECUPERACIÓN ---
-PROFUNDIDAD_MAX = 15  # Profundidad máxima para no dejar nada
-HILOS = 15            # Menos hilos = Mayor estabilidad (evita bloqueos del server)
-TIMEOUT = 30          # 30s de paciencia para carpetas gigantes
-MAX_RETRIES = 3       # Intentos por carpeta antes de rendirse
+# --- AJUSTES DE RENDIMIENTO BLINDADO ---
+PROFUNDIDAD_MAX = 15  # Profundidad total
+HILOS = 15            # Hilos moderados para no saturar y causar errores 404 falsos
+TIMEOUT = 40          # 40s de espera por carpeta
+MAX_RETRIES = 5       # 5 Intentos por carpeta (Clave para recuperar los 81k)
 
-# Filtros
+# --- 1. LISTA NEGRA EXACTA (DEL COMMIT) ---
 PROHIBIDO = [
     "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI", "SEX", "sex", 
     "peliculas", "Peliculas", "PELICULAS", "CINE%20CAM", "PELICULAS%204K", 
-    "SAGA", "CINECAN", "CLASICAST", "ESTRENOS", "KIDS", "MEXICANAST", 
-    "Navidad", "PELICULAS", "Disney", "Pixar", "Dreamworks"
+    "PELICULAS%2060%20FPS", "SAGA", "CINECAN", "CLASICAST", "ESTRENOS%20PELICULAS%202", 
+    "KIDS", "MEXICANAST", "Navidad", "PELICULAS%2060%20FPS", "PELICULAS%202023", 
+    "PELICULAS2024", "PELICULAS%20DC", "PELICULAS%20DE%20ACCION", "PELICULAS%20DISNEY"
 ]
 
+# --- 2. EXTENSIONES VÁLIDAS ---
 EXTENSIONES_VIDEO = ['.mp4', '.mkv', '.avi']
 
+# --- 3. CARPETAS A IGNORAR AL BUSCAR EL NOMBRE DE LA SERIE ---
 IGNORAR_EN_GRUPO = [
     'contenido', 'server2', 'server3', 'series', 'series 4k', 'series 4k', 
     'lat', 'sub', 'cast', 'dual', 'latino', 'spa', 'eng', 'english', 'spanish',
@@ -65,61 +67,66 @@ def es_contenido_permitido(url):
     return True
 
 def obtener_grupo_inteligente(url_completa):
-    """Lógica inteligente V2 para el nombre de la serie"""
+    """
+    Recupera el nombre limpio de la serie ignorando carpetas basura.
+    """
     path = urllib.parse.urlparse(url_completa).path
     path = unquote(path)
     partes = path.split('/')
     partes = [p for p in partes if p.strip()]
-    if partes: partes.pop() 
+    if partes: partes.pop() # Quitar archivo
 
     for carpeta in reversed(partes):
         carpeta_lower = carpeta.lower()
+        
+        # Ignorar números y temporadas
         if re.match(r'^\d+$', carpeta): continue
         if re.search(r'^(season|temporada|temp|t\d+|s\d+|vol|volume)', carpeta_lower): continue
         
+        # Ignorar palabras técnicas
         ignorar_este = False
         for basura in IGNORAR_EN_GRUPO:
             if basura == carpeta_lower:
                 ignorar_este = True; break
         if ignorar_este: continue
 
+        # Limpieza final del nombre
         nombre_final = re.sub(r'\s+4k$', '', carpeta, flags=re.IGNORECASE)
         return nombre_final.strip()
 
     return "Series Varias"
 
 def request_con_retry(url):
-    """Intenta descargar la URL varias veces si falla"""
+    """Intenta descargar con mucha paciencia (Recuperador de archivos)"""
     for intento in range(MAX_RETRIES):
         try:
             r = requests.get(url, timeout=TIMEOUT)
             if r.status_code == 200:
                 return r
             elif r.status_code == 404:
-                return None # No existe, no reintentar
+                return None 
         except requests.RequestException:
-            pass # Falló conexión, reintentar
+            pass 
         
-        # Espera un poco antes de reintentar (backoff)
+        # Espera un poco antes de reintentar
         time.sleep(1 + intento)
     
     return None
 
 def escanear_url(url):
-    """Procesa UNA carpeta con blindaje contra fallos"""
+    """Exploración robusta con reintentos"""
     subcarpetas_nuevas = []
     
-    # 1. Descargar con reintentos
+    # 1. Descarga Blindada
     r = request_con_retry(url)
     
     if not r:
-        # Si falló después de 3 intentos, lo registramos
         with lock_lista:
             errores_log.append(url)
         return []
 
     try:
-        # 2. Analizar contenido
+        # 2. Análisis
         enlaces = re.findall(r'href=["\'](.*?)["\']', r.text)
 
         for link_raw in enlaces:
@@ -127,7 +134,7 @@ def escanear_url(url):
             
             full_link = urljoin(url, link_raw)
             
-            # VIDEO DETECTADO
+            # --- CASO VIDEO ---
             if any(link_raw.lower().endswith(ext) for ext in EXTENSIONES_VIDEO):
                 if not es_contenido_permitido(full_link): continue
 
@@ -142,28 +149,31 @@ def escanear_url(url):
                 with lock_lista:
                     lista_final.append(entry)
 
-            # CARPETA DETECTADA
+            # --- CASO CARPETA ---
             elif link_raw.endswith('/'):
                 if not es_contenido_permitido(full_link): continue
                 subcarpetas_nuevas.append(full_link)
 
     except Exception as e:
-        # Error de parsing raro
-        print(f"Error procesando {url}: {e}")
+        # Si falla el parseo, lo anotamos
         pass
         
     return subcarpetas_nuevas
 
 # ==========================================
-# 🚀 EJECUCIÓN BLINDADA
+# 🚀 EJECUCIÓN
 # ==========================================
 
-print(f"--- ESCANEO SERIES V3.2 (TANK MODE) ---")
-print(f"Host: {HOST}")
-print(f"Config: Hilos={HILOS}, Timeout={TIMEOUT}s, Retries={MAX_RETRIES}, Profundidad={PROFUNDIDAD_MAX}")
+print(f"--- ESCANEO SERIES V6 (FINAL FUSION) ---")
 
-# Nivel 0
-urls_actuales = [urljoin(HOST, ruta) for ruta in RUTAS_SEMILLA]
+if not HOST:
+    print("❌ Error: Variable URL_SERVER_IP no definida.")
+    exit(1)
+
+print(f"Host: {HOST}")
+print(f"Config: Hilos={HILOS}, Timeout={TIMEOUT}s, Retries={MAX_RETRIES}")
+
+urls_actuales = [urljoin(HOST, ruta) for ruta in RUTAS_A_ESCANEAR]
 for u in urls_actuales: visitados.add(u)
 
 for nivel in range(1, PROFUNDIDAD_MAX + 1):
@@ -186,21 +196,19 @@ for nivel in range(1, PROFUNDIDAD_MAX + 1):
                     siguientes_urls.append(n)
             
             completados += 1
-            if completados % 20 == 0:
-                print(f"   [N{nivel}] Progreso: {completados}/{total_nivel} | Series: {len(lista_final)}", end="\r")
+            if completados % 50 == 0:
+                print(f"   Progreso: {completados}/{total_nivel} | Encontrados: {len(lista_final)}", end="\r")
 
     urls_actuales = siguientes_urls
     if not urls_actuales:
-        print("\n   ✅ Profundidad máxima alcanzada o sin más carpetas.")
+        print("\n   ✅ Fin de carpetas.")
         break
 
 print(f"\n\n🏁 FINALIZADO.")
-print(f"📥 Episodios totales recuperados: {len(lista_final)}")
+print(f"📥 Episodios totales: {len(lista_final)}")
 
 if errores_log:
-    print(f"⚠️ Hubo {len(errores_log)} carpetas imposibles de leer (Timeouts/Errores).")
-    # Opcional: Imprimir las primeras 5 para ver qué falló
-    # for e in errores_log[:5]: print(f"   - {e}")
+    print(f"⚠️ Atención: {len(errores_log)} carpetas fallaron completamente tras 5 intentos.")
 
 with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
     f.write("#EXTM3U\n")
