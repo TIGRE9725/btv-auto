@@ -8,7 +8,7 @@ import time
 from urllib.parse import urljoin, unquote
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN V7.3 (FINAL BLINDADA)
+# ⚙️ CONFIGURACIÓN V8 (SMART DECODE)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
@@ -36,9 +36,8 @@ PROHIBIDO = [
     "PELICULAS2024", "PELICULAS%20DC", "PELICULAS%20DE%20ACCION", "PELICULAS%20DISNEY"
 ]
 
-# --- 2. LISTA BLANCA (TU SALVACIÓN) ---
-# Si el video NO tiene una de estas palabras en su ruta completa, NO ENTRA.
-# Esto es lo que elimina "Ad Astra" pero deja "Game of Thrones".
+# --- 2. LISTA BLANCA (OBLIGATORIO) ---
+# Ahora funciona aunque escribas con espacios y el server tenga %20
 PERMITIDOS = [
     "Game of Thrones", "Game%20of%20Thrones", "Game%20of%20Thrones4k", 
     "Dave,%20El%20Barbaro", "Monster%20High", "Monster%20High%20Serie", 
@@ -57,7 +56,6 @@ PERMITIDOS = [
 EXTENSIONES_VIDEO = ['.mp4', '.mkv', '.avi']
 
 # --- 3. IGNORAR EN GRUPO ---
-# Palabras que el script salta al leer el nombre de la carpeta
 IGNORAR_EN_GRUPO = [
     'contenido', 'server2', 'server3', 'series', 'series 4k', 'series 4k', 
     'lat', 'sub', 'cast', 'dual', 'latino', 'spa', 'eng', 'english', 'spanish',
@@ -87,18 +85,24 @@ def limpiar_texto(texto):
 
 def pasa_los_filtros(url):
     """
-    Combina ambos filtros: PROHIBIDO y PERMITIDO.
+    Versión V8: Compara contra la URL original y la DECODIFICADA.
+    Esto arregla el problema de los espacios vs %20.
     """
     url_lower = url.lower() 
+    url_decoded = unquote(url).lower() # Traducimos %20 a espacios
     
     # 1. Chequeo de Lista Negra
     for mal in PROHIBIDO:
-        if mal.lower() in url_lower:
+        mal_lower = mal.lower()
+        if mal_lower in url_lower or mal_lower in url_decoded:
             return False
             
     # 2. Chequeo de Lista Blanca (OBLIGATORIO)
+    # Debe contener al menos una palabra clave de PERMITIDOS
     for bien in PERMITIDOS:
-        if bien in url: 
+        bien_lower = bien.lower()
+        # Verificamos si la palabra está en la URL normal O en la URL traducida
+        if bien_lower in url_lower or bien_lower in url_decoded: 
             return True
             
     return False
@@ -164,7 +168,7 @@ def escanear_url(url):
             # --- CASO VIDEO ---
             if any(link_raw.lower().endswith(ext) for ext in EXTENSIONES_VIDEO):
                 
-                # EL FILTRO QUE SALVA EL DÍA:
+                # AQUI APLICAMOS EL FILTRO INTELIGENTE V8
                 if not pasa_los_filtros(full_link): continue
 
                 titulo = limpiar_texto(link_raw)
@@ -180,8 +184,6 @@ def escanear_url(url):
 
             # --- CASO CARPETA ---
             elif link_raw.endswith('/'):
-                # Permitimos entrar a carpetas genéricas (como /4KL/)
-                # para buscar series dentro. Solo bloqueamos las prohibidas explícitas.
                 es_valida = True
                 for mal in PROHIBIDO:
                     if mal.lower() in full_link.lower():
@@ -199,7 +201,7 @@ def escanear_url(url):
 # 🚀 EJECUCIÓN
 # ==========================================
 
-print(f"--- ESCANEO SERIES V7.3 (FINAL) ---")
+print(f"--- ESCANEO SERIES V8 (SMART DECODE) ---")
 
 if not HOST:
     print("❌ Error: Variable URL_SERVER_IP no definida.")
