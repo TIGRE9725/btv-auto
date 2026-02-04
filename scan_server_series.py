@@ -8,7 +8,7 @@ import time
 from urllib.parse import urljoin, unquote
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN V6 (FINAL FUSION)
+# ⚙️ CONFIGURACIÓN V7.1 (MATCH TOTAL)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
@@ -21,13 +21,18 @@ RUTAS_A_ESCANEAR = [
 
 ARCHIVO_SALIDA = "lista_server_series.m3u"
 
-# --- AJUSTES DE RENDIMIENTO BLINDADO ---
-PROFUNDIDAD_MAX = 15  # Profundidad total
-HILOS = 15            # Hilos moderados para no saturar y causar errores 404 falsos
-TIMEOUT = 40          # 40s de espera por carpeta
-MAX_RETRIES = 5       # 5 Intentos por carpeta (Clave para recuperar los 81k)
+# --- AJUSTES DE RENDIMIENTO ---
+PROFUNDIDAD_MAX = 15  
+HILOS = 15            
+TIMEOUT = 40          
+MAX_RETRIES = 5       
 
-# --- 1. LISTA NEGRA EXACTA (DEL COMMIT) ---
+# --- CONFIGURACIÓN DE CONEXIÓN (RECUPERADO) ---
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+# --- 1. LISTA NEGRA (Lo que NUNCA debe entrar) ---
 PROHIBIDO = [
     "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI", "SEX", "sex", 
     "peliculas", "Peliculas", "PELICULAS", "CINE%20CAM", "PELICULAS%204K", 
@@ -36,10 +41,25 @@ PROHIBIDO = [
     "PELICULAS2024", "PELICULAS%20DC", "PELICULAS%20DE%20ACCION", "PELICULAS%20DISNEY"
 ]
 
-# --- 2. EXTENSIONES VÁLIDAS ---
+# --- 2. LISTA BLANCA (OBLIGATORIO: Debe tener al menos una de estas palabras) ---
+PERMITIDOS = [
+    "Game of Thrones", "Game%20of%20Thrones", "Game%20of%20Thrones4k", 
+    "Dave,%20El%20Barbaro", "Monster%20High", "Monster%20High%20Serie", 
+    "Rupaul's%20Drag%20Race%20All%20Stars", "Switch%20Drag%20Race", 
+    "The_Neighborhoodt", "Yin%20Yang%20Yo", "Ahsoka%204k", 
+    "Game%20Of%20Thrones", "Game%20Of%20Thrones%204k",
+    "Season", "Temporada", "Capitulo", "Episodio",
+    "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
+    "E01", "E02", "Series", "Serie", "series", "serie", 
+    "SERIES%204K", "ANIME", "ANIME%202023", "DORAMAS", 
+    "ESTRENO%20SERIES", "REPARTIR", "Primo", "RETROSV", 
+    "SEIRES%202023", "SERIES%202024", "Series_2", "TURKASS", 
+    "Telenovelas", "Tv%20Novelas%202", "SERIES%20DOBLE%20AUIDO%202"
+]
+
 EXTENSIONES_VIDEO = ['.mp4', '.mkv', '.avi']
 
-# --- 3. CARPETAS A IGNORAR AL BUSCAR EL NOMBRE DE LA SERIE ---
+# --- 3. CARPETAS A IGNORAR AL BUSCAR EL NOMBRE DEL GRUPO ---
 IGNORAR_EN_GRUPO = [
     'contenido', 'server2', 'server3', 'series', 'series 4k', 'series 4k', 
     'lat', 'sub', 'cast', 'dual', 'latino', 'spa', 'eng', 'english', 'spanish',
@@ -56,68 +76,78 @@ lista_final = []
 visitados = set()
 errores_log = []
 
+# Iniciamos sesión persistente (Mejora de rendimiento del código original)
+session = requests.Session()
+session.headers.update(HEADERS)
+
 def limpiar_texto(texto):
     return unquote(texto)
 
-def es_contenido_permitido(url):
-    url_lower = url.lower()
+def pasa_los_filtros(url):
+    """
+    Aplica la lógica estricta:
+    1. NO debe estar en PROHIBIDO.
+    2. DEBE estar en PERMITIDOS (Whitelist).
+    """
+    url_lower = url.lower() 
+    
+    # 1. Chequeo de Lista Negra
     for mal in PROHIBIDO:
         if mal.lower() in url_lower:
             return False
-    return True
+            
+    # 2. Chequeo de Lista Blanca
+    # Debe contener al menos una palabra clave de PERMITIDOS
+    for bien in PERMITIDOS:
+        if bien in url: 
+            return True
+            
+    return False
 
 def obtener_grupo_inteligente(url_completa):
     """
-    Recupera el nombre limpio de la serie ignorando carpetas basura.
+    Lógica 'Inteligente' (Reverse Path) para limpiar nombres de grupos
     """
     path = urllib.parse.urlparse(url_completa).path
     path = unquote(path)
     partes = path.split('/')
     partes = [p for p in partes if p.strip()]
-    if partes: partes.pop() # Quitar archivo
+    if partes: partes.pop() 
 
     for carpeta in reversed(partes):
         carpeta_lower = carpeta.lower()
-        
-        # Ignorar números y temporadas
         if re.match(r'^\d+$', carpeta): continue
         if re.search(r'^(season|temporada|temp|t\d+|s\d+|vol|volume)', carpeta_lower): continue
         
-        # Ignorar palabras técnicas
         ignorar_este = False
         for basura in IGNORAR_EN_GRUPO:
             if basura == carpeta_lower:
                 ignorar_este = True; break
         if ignorar_este: continue
 
-        # Limpieza final del nombre
         nombre_final = re.sub(r'\s+4k$', '', carpeta, flags=re.IGNORECASE)
         return nombre_final.strip()
 
     return "Series Varias"
 
 def request_con_retry(url):
-    """Intenta descargar con mucha paciencia (Recuperador de archivos)"""
+    """Recuperador de archivos usando la SESIÓN global"""
     for intento in range(MAX_RETRIES):
         try:
-            r = requests.get(url, timeout=TIMEOUT)
+            # Usamos 'session.get' en lugar de 'requests.get' para mantener headers y cookies
+            r = session.get(url, timeout=TIMEOUT)
             if r.status_code == 200:
                 return r
             elif r.status_code == 404:
                 return None 
         except requests.RequestException:
             pass 
-        
-        # Espera un poco antes de reintentar
         time.sleep(1 + intento)
-    
     return None
 
 def escanear_url(url):
-    """Exploración robusta con reintentos"""
     subcarpetas_nuevas = []
     
-    # 1. Descarga Blindada
     r = request_con_retry(url)
     
     if not r:
@@ -126,7 +156,6 @@ def escanear_url(url):
         return []
 
     try:
-        # 2. Análisis
         enlaces = re.findall(r'href=["\'](.*?)["\']', r.text)
 
         for link_raw in enlaces:
@@ -136,7 +165,8 @@ def escanear_url(url):
             
             # --- CASO VIDEO ---
             if any(link_raw.lower().endswith(ext) for ext in EXTENSIONES_VIDEO):
-                if not es_contenido_permitido(full_link): continue
+                # AQUI APLICAMOS TU FILTRO ESTRICTO (WHITELIST)
+                if not pasa_los_filtros(full_link): continue
 
                 titulo = limpiar_texto(link_raw)
                 for ext in EXTENSIONES_VIDEO:
@@ -151,11 +181,16 @@ def escanear_url(url):
 
             # --- CASO CARPETA ---
             elif link_raw.endswith('/'):
-                if not es_contenido_permitido(full_link): continue
-                subcarpetas_nuevas.append(full_link)
+                # Filtro de seguridad solo para carpetas (PROHIBIDO)
+                es_valida = True
+                for mal in PROHIBIDO:
+                    if mal.lower() in full_link.lower():
+                        es_valida = False; break
+                
+                if es_valida:
+                    subcarpetas_nuevas.append(full_link)
 
-    except Exception as e:
-        # Si falla el parseo, lo anotamos
+    except:
         pass
         
     return subcarpetas_nuevas
@@ -164,14 +199,13 @@ def escanear_url(url):
 # 🚀 EJECUCIÓN
 # ==========================================
 
-print(f"--- ESCANEO SERIES V6 (FINAL FUSION) ---")
+print(f"--- ESCANEO SERIES V7.1 (FINAL CODE MATCH) ---")
 
 if not HOST:
     print("❌ Error: Variable URL_SERVER_IP no definida.")
     exit(1)
 
 print(f"Host: {HOST}")
-print(f"Config: Hilos={HILOS}, Timeout={TIMEOUT}s, Retries={MAX_RETRIES}")
 
 urls_actuales = [urljoin(HOST, ruta) for ruta in RUTAS_A_ESCANEAR]
 for u in urls_actuales: visitados.add(u)
@@ -208,7 +242,7 @@ print(f"\n\n🏁 FINALIZADO.")
 print(f"📥 Episodios totales: {len(lista_final)}")
 
 if errores_log:
-    print(f"⚠️ Atención: {len(errores_log)} carpetas fallaron completamente tras 5 intentos.")
+    print(f"⚠️ {len(errores_log)} carpetas fallaron tras {MAX_RETRIES} intentos.")
 
 with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
     f.write("#EXTM3U\n")
