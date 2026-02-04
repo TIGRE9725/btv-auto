@@ -8,7 +8,7 @@ import time
 from urllib.parse import urljoin, unquote
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN V7.1 (MATCH TOTAL)
+# ⚙️ CONFIGURACIÓN V7.3 (FINAL BLINDADA)
 # ==========================================
 
 HOST = os.environ.get("URL_SERVER_IP")
@@ -27,11 +27,6 @@ HILOS = 15
 TIMEOUT = 40          
 MAX_RETRIES = 5       
 
-# --- CONFIGURACIÓN DE CONEXIÓN (RECUPERADO) ---
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
-
 # --- 1. LISTA NEGRA (Lo que NUNCA debe entrar) ---
 PROHIBIDO = [
     "XXX", "xxx", "ADULT", "18+", "PORN", "XVIDEOS", "HENTAI", "SEX", "sex", 
@@ -41,7 +36,9 @@ PROHIBIDO = [
     "PELICULAS2024", "PELICULAS%20DC", "PELICULAS%20DE%20ACCION", "PELICULAS%20DISNEY"
 ]
 
-# --- 2. LISTA BLANCA (OBLIGATORIO: Debe tener al menos una de estas palabras) ---
+# --- 2. LISTA BLANCA (TU SALVACIÓN) ---
+# Si el video NO tiene una de estas palabras en su ruta completa, NO ENTRA.
+# Esto es lo que elimina "Ad Astra" pero deja "Game of Thrones".
 PERMITIDOS = [
     "Game of Thrones", "Game%20of%20Thrones", "Game%20of%20Thrones4k", 
     "Dave,%20El%20Barbaro", "Monster%20High", "Monster%20High%20Serie", 
@@ -59,13 +56,19 @@ PERMITIDOS = [
 
 EXTENSIONES_VIDEO = ['.mp4', '.mkv', '.avi']
 
-# --- 3. CARPETAS A IGNORAR AL BUSCAR EL NOMBRE DEL GRUPO ---
+# --- 3. IGNORAR EN GRUPO ---
+# Palabras que el script salta al leer el nombre de la carpeta
 IGNORAR_EN_GRUPO = [
     'contenido', 'server2', 'server3', 'series', 'series 4k', 'series 4k', 
     'lat', 'sub', 'cast', 'dual', 'latino', 'spa', 'eng', 'english', 'spanish',
-    '1080p', '720p', '4k', 'hd', 'sd', 'web-dl',
-    'temp', 'temporada', 'season', 's', 't', 'vol', 'volume'
+    '1080p', '720p', '4k', '4kl', '4ku', 'hd', 'sd', 'web-dl', 'uhd',
+    'temp', 'temporada', 'season', 's', 't', 'vol', 'volume',
+    'estrenos', 'estreno'
 ]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
 # ==========================================
 # 🛠️ FUNCIONES
@@ -76,7 +79,6 @@ lista_final = []
 visitados = set()
 errores_log = []
 
-# Iniciamos sesión persistente (Mejora de rendimiento del código original)
 session = requests.Session()
 session.headers.update(HEADERS)
 
@@ -85,9 +87,7 @@ def limpiar_texto(texto):
 
 def pasa_los_filtros(url):
     """
-    Aplica la lógica estricta:
-    1. NO debe estar en PROHIBIDO.
-    2. DEBE estar en PERMITIDOS (Whitelist).
+    Combina ambos filtros: PROHIBIDO y PERMITIDO.
     """
     url_lower = url.lower() 
     
@@ -96,8 +96,7 @@ def pasa_los_filtros(url):
         if mal.lower() in url_lower:
             return False
             
-    # 2. Chequeo de Lista Blanca
-    # Debe contener al menos una palabra clave de PERMITIDOS
+    # 2. Chequeo de Lista Blanca (OBLIGATORIO)
     for bien in PERMITIDOS:
         if bien in url: 
             return True
@@ -105,9 +104,6 @@ def pasa_los_filtros(url):
     return False
 
 def obtener_grupo_inteligente(url_completa):
-    """
-    Lógica 'Inteligente' (Reverse Path) para limpiar nombres de grupos
-    """
     path = urllib.parse.urlparse(url_completa).path
     path = unquote(path)
     partes = path.split('/')
@@ -116,25 +112,27 @@ def obtener_grupo_inteligente(url_completa):
 
     for carpeta in reversed(partes):
         carpeta_lower = carpeta.lower()
+        
+        # Ignora carpetas numéricas (ej: "8")
         if re.match(r'^\d+$', carpeta): continue
         if re.search(r'^(season|temporada|temp|t\d+|s\d+|vol|volume)', carpeta_lower): continue
         
+        # Ignora carpetas basura (ej: "4KL")
         ignorar_este = False
         for basura in IGNORAR_EN_GRUPO:
             if basura == carpeta_lower:
                 ignorar_este = True; break
         if ignorar_este: continue
 
+        # Limpia "Game of Thrones 4k" -> "Game of Thrones"
         nombre_final = re.sub(r'\s+4k$', '', carpeta, flags=re.IGNORECASE)
         return nombre_final.strip()
 
     return "Series Varias"
 
 def request_con_retry(url):
-    """Recuperador de archivos usando la SESIÓN global"""
     for intento in range(MAX_RETRIES):
         try:
-            # Usamos 'session.get' en lugar de 'requests.get' para mantener headers y cookies
             r = session.get(url, timeout=TIMEOUT)
             if r.status_code == 200:
                 return r
@@ -165,7 +163,8 @@ def escanear_url(url):
             
             # --- CASO VIDEO ---
             if any(link_raw.lower().endswith(ext) for ext in EXTENSIONES_VIDEO):
-                # AQUI APLICAMOS TU FILTRO ESTRICTO (WHITELIST)
+                
+                # EL FILTRO QUE SALVA EL DÍA:
                 if not pasa_los_filtros(full_link): continue
 
                 titulo = limpiar_texto(link_raw)
@@ -181,7 +180,8 @@ def escanear_url(url):
 
             # --- CASO CARPETA ---
             elif link_raw.endswith('/'):
-                # Filtro de seguridad solo para carpetas (PROHIBIDO)
+                # Permitimos entrar a carpetas genéricas (como /4KL/)
+                # para buscar series dentro. Solo bloqueamos las prohibidas explícitas.
                 es_valida = True
                 for mal in PROHIBIDO:
                     if mal.lower() in full_link.lower():
@@ -199,7 +199,7 @@ def escanear_url(url):
 # 🚀 EJECUCIÓN
 # ==========================================
 
-print(f"--- ESCANEO SERIES V7.1 (FINAL CODE MATCH) ---")
+print(f"--- ESCANEO SERIES V7.3 (FINAL) ---")
 
 if not HOST:
     print("❌ Error: Variable URL_SERVER_IP no definida.")
